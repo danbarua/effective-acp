@@ -32,6 +32,7 @@ import {
   v1WithExtensions,
 } from "./negotiation-test-agent.ts";
 import * as Protocol from "./protocol.ts";
+import * as ProtocolV2 from "./protocol-v2.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
 import { fromWebStreams } from "./stdio.ts";
@@ -58,7 +59,7 @@ const clientV1 = (seen: Seen, capabilities: V1.ClientCapabilities = {}) =>
   });
 
 const clientV2 = (seen: Seen) =>
-  Client.implement(Protocol.v2, {
+  Client.implement(ProtocolV2.v2, {
     capabilities: {},
     handlers: () =>
       Effect.succeed({
@@ -716,7 +717,7 @@ describe("extension methods", () => {
     expect(() => Client.implement(Protocol.v1, { notify: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
       '"an/echo" is declared as an extension method',
     );
-    expect(() => Agent.implement(Protocol.v2, { serve: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
+    expect(() => Agent.implement(ProtocolV2.v2, { serve: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
       '"an/echo" is declared as an extension method',
     );
   });

@@ -62,6 +62,11 @@
       "types": "./dist/protocol.d.ts",
       "default": "./dist/protocol.js"
     },
+    "./protocol/v2": {
+      "bun": "./src/protocol-v2.ts",
+      "types": "./dist/protocol-v2.d.ts",
+      "default": "./dist/protocol-v2.js"
+    },
     "./stdio": {
       "bun": "./src/stdio.ts",
       "types": "./dist/stdio.d.ts",

@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { decode } from "./negotiation-test-agent.ts";
 import * as Protocol from "./protocol.ts";
+import * as ProtocolV2 from "./protocol-v2.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
 
@@ -249,22 +250,22 @@ describe("version 2's gates", () => {
     "AN11: %s %s %s is refused naming its capability when it is not advertised, and let through when it is",
     (_direction, _method, _params, c) => {
       const base = c.needs === "params" ? v2MethodsOnly : v2SessionOnly;
-      expect(refusal(Protocol.v2.gate(c.direction, c.method, c.params, base))).toEqual({
+      expect(refusal(ProtocolV2.v2.gate(c.direction, c.method, c.params, base))).toEqual({
         capability: c.capability,
         needs: c.needs,
       });
-      expect(Protocol.v2.gate(c.direction, c.method, c.params, v2Everything)).toEqual({ _tag: "Allowed" });
+      expect(ProtocolV2.v2.gate(c.direction, c.method, c.params, v2Everything)).toEqual({ _tag: "Allowed" });
     },
   );
 
   test("AN11: every session method needs capabilities.session, and auth/login a methodId the agent advertised that is not of type terminal", () => {
     const nothing = v2Profile({}, {});
     for (const method of ["new", "prompt", "cancel", "list", "resume", "close", "set_config_option", "delete", "fork"])
-      expect(refusal(Protocol.v2.gate("toAgent", `session/${method}`, {}, nothing))).toEqual({
+      expect(refusal(ProtocolV2.v2.gate("toAgent", `session/${method}`, {}, nothing))).toEqual({
         capability: "capabilities.session",
         needs: "method",
       });
-    expect(refusal(Protocol.v2.gate("toAgent", "auth/login", { methodId: "terminal-login" }, v2Everything))).toEqual({
+    expect(refusal(ProtocolV2.v2.gate("toAgent", "auth/login", { methodId: "terminal-login" }, v2Everything))).toEqual({
       capability: "authMethods",
       needs: "params",
     });
@@ -280,6 +281,6 @@ describe("version 2's gates", () => {
       ["toClient", "elicitation/create", { mode: "_custom" }],
     ];
     for (const [direction, method, params] of allowed)
-      expect(Protocol.v2.gate(direction, method, params, v2SessionOnly)).toEqual({ _tag: "Allowed" });
+      expect(ProtocolV2.v2.gate(direction, method, params, v2SessionOnly)).toEqual({ _tag: "Allowed" });
   });
 });

@@ -19,6 +19,7 @@ import * as Agent from "./agent.ts";
 import type { JsonRpcErrorObject } from "./json-rpc.ts";
 import * as Methods from "./methods.ts";
 import * as Protocol from "./protocol.ts";
+import * as ProtocolV2 from "./protocol-v2.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
 
@@ -154,7 +155,7 @@ export const v1 = (capabilities: V1.AgentCapabilities = {}, authMethods: Readonl
   });
 
 export const v2 = (capabilities: V2.AgentCapabilities = { session: {} }, authMethods: ReadonlyArray<V2.AuthMethod> = []) =>
-  Agent.implement(Protocol.v2, {
+  Agent.implement(ProtocolV2.v2, {
     capabilities,
     authMethods,
     handlers: (connection) =>

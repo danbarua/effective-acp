@@ -15,12 +15,13 @@
  */
 
 import { Data, Predicate, Schema } from "effect";
+import { allowed, at, authMethodGate, elicitationGate, gateWith, isUpdate, listAt, need, offeredAuthMethods, promptGate, sessionSetupGate, typeOf } from "./gates.ts";
 import { ErrorCode, JsonRpcError } from "./json-rpc.ts";
 import type * as Methods from "./methods.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V1Rpcs from "./schema/v1.rpcs.gen.ts";
-import * as V2 from "./schema/v2.gen.ts";
-import * as V2Rpcs from "./schema/v2.rpcs.gen.ts";
+import type * as V2 from "./schema/v2.gen.ts";
+import type * as V2Rpcs from "./schema/v2.rpcs.gen.ts";
 
 /** The protocol versions built here. */
 export type ProtocolVersion = 1 | 2;
@@ -184,106 +185,6 @@ export const refusalError = (refused: Refused): JsonRpcError =>
 /** ACP reserves method names that start with `_` for extensions. No gate stands in front of them. */
 export const isExtensionMethod = (method: string): boolean => method.startsWith("_");
 
-const allowed: Gate = { _tag: "Allowed" };
-
-/** The value at `path` under `value`, or undefined where the path leaves objects. */
-const at = (value: unknown, path: ReadonlyArray<string>): unknown =>
-  path.reduce<unknown>((current, key) => (Predicate.isObject(current) ? current[key] : undefined), value);
-
-const listAt = (value: unknown, key: string): ReadonlyArray<unknown> => {
-  const list = at(value, [key]);
-  return Array.isArray(list) ? list : [];
-};
-
-const typeOf = (value: unknown, key = "type"): unknown => at(value, [key]);
-
-/** A capability is advertised when it is present and neither `null` nor `false`. */
-const isAdvertised = (value: unknown): boolean => value !== undefined && value !== null && value !== false;
-
-/** Refuses unless the capability at `path` under `root` (named `rootName`) is advertised. */
-const need = (
-  root: unknown,
-  rootName: string,
-  path: ReadonlyArray<string>,
-  needs: "method" | "params",
-  why: string,
-): Gate => {
-  if (isAdvertised(at(root, path))) return allowed;
-  const capability = [rootName, ...path].join(".");
-  return { _tag: "Refused", capability, needs, message: `${why} needs ${capability}, which was not advertised` };
-};
-
-/** The first refusal, or allowed. */
-const first = (gates: Iterable<() => Gate>): Gate => {
-  for (const gate of gates) {
-    const result = gate();
-    if (result._tag === "Refused") return result;
-  }
-  return allowed;
-};
-
-/** `authMethods` without those of type `terminal`, unless the client advertised terminal auth at `path` under `request`. */
-const offeredAuthMethods = <A>(request: unknown, path: ReadonlyArray<string>, authMethods: ReadonlyArray<A>): ReadonlyArray<A> =>
-  isAdvertised(at(request, path))
-    ? authMethods
-    : authMethods.filter((authMethod) => typeOf(authMethod) !== "terminal");
-
-/** `methodId` must be an advertised method that is not of type `terminal`, which the client runs itself. */
-const authMethodGate = (method: string, params: unknown, authMethods: ReadonlyArray<unknown>, idKey: string): Gate => {
-  const methodId = at(params, ["methodId"]);
-  const found = authMethods.find((advertisedMethod) => at(advertisedMethod, [idKey]) === methodId);
-  if (found !== undefined && typeOf(found) !== "terminal") return allowed;
-  return {
-    _tag: "Refused",
-    capability: "authMethods",
-    needs: "params",
-    message:
-      found === undefined
-        ? `${method} names the auth method ${JSON.stringify(methodId)}, which the agent did not advertise`
-        : `${method} names the terminal auth method ${JSON.stringify(methodId)}, which the client runs itself`,
-  };
-};
-
-/** Each prompt block of a type that needs a capability: `image`, `audio`, and `resource` (embedded context). */
-const promptGate = (method: string, params: unknown, check: (capability: string, why: string) => Gate): Gate =>
-  first(
-    listAt(params, "prompt").map((block) => () => {
-      const type = typeOf(block);
-      if (type === "image") return check("image", `${method} with an image block`);
-      if (type === "audio") return check("audio", `${method} with an audio block`);
-      if (type === "resource") return check("embeddedContext", `${method} with an embedded resource block`);
-      return allowed;
-    }),
-  );
-
-/** `additionalDirectories` that is not empty, and each MCP server's transport. */
-const sessionSetupGate = (
-  method: string,
-  params: unknown,
-  additionalDirectories: (why: string) => Gate,
-  mcpServer: (type: unknown, why: string) => Gate,
-): Gate =>
-  first([
-    () =>
-      listAt(params, "additionalDirectories").length > 0
-        ? additionalDirectories(`${method} with additionalDirectories`)
-        : allowed,
-    ...listAt(params, "mcpServers").map(
-      (server) => () => mcpServer(typeOf(server), `${method} with an MCP server of type ${JSON.stringify(typeOf(server))}`),
-    ),
-  ]);
-
-/** `elicitation/create` in mode `form` or `url` needs that mode advertised; other modes are custom, and no capability names them. */
-const elicitationGate = (method: string, params: unknown, check: (mode: string, why: string) => Gate): Gate => {
-  const mode = at(params, ["mode"]);
-  return mode === "form" || mode === "url" ? check(mode, `${method} in mode ${mode}`) : allowed;
-};
-
-const isUpdate = (params: unknown, ...kinds: ReadonlyArray<string>): boolean => {
-  const kind = at(params, ["update", "sessionUpdate"]);
-  return typeof kind === "string" && kinds.includes(kind);
-};
-
 const v1MethodGate = (direction: Direction, method: string, profile: Profile<V1Version>): Gate => {
   if (isExtensionMethod(method)) return allowed;
   const agent = (path: ReadonlyArray<string>) =>
@@ -351,76 +252,6 @@ const v1ParamsGate = (direction: Direction, method: string, params: unknown, pro
   return allowed;
 };
 
-const v2MethodGate = (direction: Direction, method: string, profile: Profile<V2Version>): Gate => {
-  if (isExtensionMethod(method)) return allowed;
-  const agent = (path: ReadonlyArray<string>) => need(profile.agent.capabilities, "capabilities", path, "method", method);
-  const client = (path: ReadonlyArray<string>) => need(profile.client.capabilities, "capabilities", path, "method", method);
-  if (direction === "toAgent") {
-    const session = method.startsWith("session/") ? method.slice("session/".length) : undefined;
-    if (session !== undefined) {
-      const surface = agent(["session"]);
-      if (surface._tag === "Refused") return surface;
-      return session === "delete" || session === "fork" ? agent(["session", session]) : allowed;
-    }
-    if (method === "auth/login" || method === "auth/logout")
-      return profile.agent.authMethods.length > 0
-        ? allowed
-        : {
-            _tag: "Refused",
-            capability: "authMethods",
-            needs: "method",
-            message: `${method} needs authMethods, which the agent left empty`,
-          };
-    if (method === "mcp/message") return agent(["session", "mcp", "acp"]);
-    if (method.startsWith("providers/")) return agent(["providers"]);
-    if (method.startsWith("nes/")) return agent(["nes"]);
-    if (method.startsWith("document/")) return agent(["nes", "events", "document", method.slice("document/".length)]);
-    return allowed;
-  }
-  if (method === "elicitation/complete") return client(["elicitation", "url"]);
-  if (method.startsWith("mcp/")) return agent(["session", "mcp", "acp"]);
-  return allowed;
-};
-
-const v2ParamsGate = (direction: Direction, method: string, params: unknown, profile: Profile<V2Version>): Gate => {
-  const agent = (path: ReadonlyArray<string>, why: string) =>
-    need(profile.agent.capabilities, "capabilities", path, "params", why);
-  const client = (path: ReadonlyArray<string>, why: string) =>
-    need(profile.client.capabilities, "capabilities", path, "params", why);
-  if (direction === "toClient")
-    return method === "elicitation/create"
-      ? elicitationGate(method, params, (mode, why) => client(["elicitation", mode], why))
-      : allowed;
-  switch (method) {
-    case "auth/login":
-      return authMethodGate(method, params, profile.agent.authMethods, "methodId");
-    case "session/prompt":
-      return promptGate(method, params, (capability, why) => agent(["session", "prompt", capability], why));
-    case "session/new":
-    case "session/resume":
-    case "session/fork":
-      return sessionSetupGate(
-        method,
-        params,
-        (why) => agent(["session", "additionalDirectories"], why),
-        (type, why) =>
-          type === "http" || type === "stdio" || type === "acp" ? agent(["session", "mcp", type], why) : allowed,
-      );
-    default:
-      return allowed;
-  }
-};
-
-const gateWith =
-  <V extends Version>(
-    methodGate: (direction: Direction, method: string, profile: Profile<V>) => Gate,
-    paramsGate: (direction: Direction, method: string, params: unknown, profile: Profile<V>) => Gate,
-  ) =>
-  (direction: Direction, method: string, params: unknown, profile: Profile<V>): Gate => {
-    const gate = methodGate(direction, method, profile);
-    return gate._tag === "Refused" ? gate : paramsGate(direction, method, params, profile);
-  };
-
 /**
  * ACP version 1, the stable protocol. `initialize` carries `clientCapabilities` and `clientInfo`,
  * and its result `agentCapabilities`, `agentInfo` and `authMethods`.
@@ -457,37 +288,4 @@ export const v1: ProtocolAdapter<V1Version> = {
   }),
   methodGate: v1MethodGate,
   gate: gateWith(v1MethodGate, v1ParamsGate),
-};
-
-/**
- * ACP version 2, the SDK's draft. `initialize` carries `capabilities` and `info` both ways, and its
- * result `authMethods`, which is left out when empty.
- */
-export const v2: ProtocolAdapter<V2Version> = {
-  protocolVersion: 2,
-  stability: "experimental",
-  agentRequests: V2Rpcs.AgentRequests,
-  agentNotifications: V2Rpcs.AgentNotifications,
-  clientRequests: V2Rpcs.ClientRequests,
-  clientNotifications: V2Rpcs.ClientNotifications,
-  unstable: V2Rpcs.unstable,
-  initializeCodec: {
-    request: Schema.toCodecJson(V2.InitializeRequest),
-    response: Schema.toCodecJson(V2.InitializeResponse),
-  },
-  initializeRequest: ({ capabilities, info }) => ({ protocolVersion: 2, capabilities, info }),
-  initializeResponse: ({ capabilities, info, authMethods }) => ({
-    protocolVersion: 2,
-    capabilities,
-    info,
-    ...(authMethods.length > 0 ? { authMethods } : {}),
-  }),
-  offeredAuthMethods: (request, authMethods) => offeredAuthMethods(request, ["capabilities", "auth", "terminal"], authMethods),
-  profile: (request, response) => ({
-    protocolVersion: 2,
-    client: { capabilities: request.capabilities ?? {}, info: request.info },
-    agent: { capabilities: response.capabilities ?? {}, info: response.info, authMethods: response.authMethods ?? [] },
-  }),
-  methodGate: v2MethodGate,
-  gate: gateWith(v2MethodGate, v2ParamsGate),
 };
