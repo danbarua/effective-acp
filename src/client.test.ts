@@ -16,7 +16,7 @@ import type * as HttpClient from "effect/http/HttpClient";
 import * as Agent from "./agent.ts";
 import * as Client from "./client.ts";
 import * as Http from "./http.ts";
-import { JsonRpcError, type Wire } from "./json-rpc.ts";
+import { JsonRpcError, type Wire, WireError } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Methods from "./methods.ts";
 import { PeerClosed } from "./methods.ts";
@@ -544,8 +544,12 @@ describe("errors a caller gets", () => {
     expect(failed).toMatchObject({ code: -32042, data: { asked: "new" } });
   });
 
-  test("AP4: PeerClosed and InitializeFailed have their reason as their message", () => {
+  test("AP4: PeerClosed, InitializeFailed and WireError have their reason as their message, and UnsupportedProtocolVersion says which versions", () => {
     expect(new PeerClosed({ reason: "The connection closed" }).message).toBe("The connection closed");
+    expect(new WireError({ reason: "ACP SSE connection failed: 409" }).message).toBe("ACP SSE connection failed: 409");
+    expect(new Client.UnsupportedProtocolVersion({ offered: 1, answered: 3 }).message).toBe(
+      "the agent answered protocol version 3, which this client does not implement (it offered 1)",
+    );
     expect(new Client.InitializeFailed({ reason: "the agent answered initialize with an error" }).message).toBe(
       "the agent answered initialize with an error",
     );

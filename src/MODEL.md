@@ -81,8 +81,9 @@ reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newlin
   a plain `{ code, message, data }` or a tagged error class) answers its request with that error:
   its `code`, `message` and `data` as given, and no `_tag` or other field. A call the other end
   answers with an error fails with a `JsonRpcError`: an `Error` whose `message` is the other end's
-  message, with its `code` and `data`. `PeerClosed` and `InitializeFailed` have their reason as
-  their `message`.
+  message, with its `code` and `data`. `PeerClosed`, `InitializeFailed` and `WireError` have their
+  reason as their `message`; `UnsupportedProtocolVersion`'s says which version was offered and
+  which answered.
 - AP5. A handler that dies answers its own request with -32603, and the connection goes on.
 - AP6. An unknown method is answered -32601, and params the method's payload schema refuses are
   answered -32602. Both are answered before any handler runs. A notification gets no response: one

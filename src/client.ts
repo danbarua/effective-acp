@@ -138,7 +138,11 @@ export function implement(
 export class UnsupportedProtocolVersion extends Data.TaggedError("UnsupportedProtocolVersion")<{
   readonly offered: number;
   readonly answered: number;
-}> {}
+}> {
+  override get message(): string {
+    return `the agent answered protocol version ${this.answered}, which this client does not implement (it offered ${this.offered})`;
+  }
+}
 
 /** `initialize` got no usable answer: the wire failed or closed, the agent answered an error or a malformed response, or a result the answered version's schema refuses. */
 export class InitializeFailed extends Data.TaggedError("InitializeFailed")<{

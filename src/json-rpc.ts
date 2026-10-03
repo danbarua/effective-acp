@@ -116,7 +116,11 @@ export const WireInput = Data.taggedEnum<WireInput>();
 export class WireError extends Data.TaggedError("WireError")<{
   readonly reason: string;
   readonly cause?: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return this.reason;
+  }
+}
 
 /**
  * One connection's messages. `read` ends when the other end closes the connection; `write` sends
