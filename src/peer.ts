@@ -55,6 +55,7 @@ import {
   isJsonRpcId,
   isResponseShaped,
   JsonRpcError,
+  JsonRpcErrorObject,
   type JsonRpcId,
   type JsonRpcMessage,
   type JsonRpcResponse,
@@ -109,7 +110,7 @@ type Classified =
   | { readonly _tag: "Request"; readonly id: JsonRpcId | null; readonly method: string; readonly params: unknown }
   | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
   | { readonly _tag: "Success"; readonly id: JsonRpcId | null; readonly result: unknown }
-  | { readonly _tag: "Failure"; readonly id: JsonRpcId | null; readonly error: JsonRpcError }
+  | { readonly _tag: "Failure"; readonly id: JsonRpcId | null; readonly error: JsonRpcErrorObject }
   | { readonly _tag: "Invalid"; readonly id: JsonRpcId | null }
   /** A malformed response; `id` is the one it carries, when it carries one. */
   | { readonly _tag: "MalformedResponse"; readonly id: JsonRpcId | null };
@@ -133,12 +134,10 @@ interface Pending {
 }
 
 /** Handlers with their methods erased. */
-type ErasedHandlers<R> = Readonly<Record<string, ((payload: unknown) => Effect.Effect<unknown, JsonRpcError, R>) | undefined>>;
+type ErasedHandlers<R> = Readonly<Record<string, ((payload: unknown) => Effect.Effect<unknown, JsonRpcErrorObject, R>) | undefined>>;
 
 /** The JSON codec of one of a method's schemas. */
 const json = (schema: Schema.Top) => Schema.toCodecJson(schema) as unknown as Schema.Codec<unknown, unknown>;
-
-const isJsonRpcError = Schema.is(JsonRpcError);
 
 const Id = Schema.declare(isJsonRpcId);
 
@@ -149,7 +148,7 @@ const Envelope = Schema.Struct({
   method: Schema.optionalKey(Schema.String),
   params: Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Unknown), Schema.Array(Schema.Unknown)])),
   result: Schema.optionalKey(Schema.Unknown),
-  error: Schema.optionalKey(JsonRpcError),
+  error: Schema.optionalKey(JsonRpcErrorObject),
 });
 
 const isEnvelope = Schema.is(Envelope);
@@ -181,22 +180,28 @@ const classify = (value: unknown): Classified => {
 const success = (id: JsonRpcId | null, result: unknown): JsonRpcResponse => ({ jsonrpc: "2.0", id, result });
 
 /** A JSON-RPC error as written or handed to a caller: its code, message and data, and nothing else of the value it came from. */
-const exactly = ({ code, message, data }: JsonRpcError): JsonRpcError => ({ code, message, ...(data !== undefined ? { data } : {}) });
+const isJsonRpcErrorObject = Schema.is(JsonRpcErrorObject);
 
-const failure = (id: JsonRpcId | null, error: JsonRpcError): JsonRpcResponse => ({ jsonrpc: "2.0", id, error: exactly(error) });
+const exactly = ({ code, message, data }: JsonRpcErrorObject): JsonRpcErrorObject => ({
+  code,
+  message,
+  ...(data !== undefined ? { data } : {}),
+});
 
-const invalidRequest: JsonRpcError = { code: ErrorCode.InvalidRequest, message: "Invalid request" };
+const failure = (id: JsonRpcId | null, error: JsonRpcErrorObject): JsonRpcResponse => ({ jsonrpc: "2.0", id, error: exactly(error) });
 
-const internalError: JsonRpcError = { code: ErrorCode.InternalError, message: "Internal error" };
+const invalidRequest: JsonRpcErrorObject = { code: ErrorCode.InvalidRequest, message: "Invalid request" };
+
+const internalError: JsonRpcErrorObject = { code: ErrorCode.InternalError, message: "Internal error" };
 
 const none: Reply<never> = { _tag: "None" };
 
 const now = (response: JsonRpcResponse): Reply<never> => ({ _tag: "Now", response });
 
 /** The JSON-RPC error a handler's failure goes out as: its typed error, else -32800 for an interruption, else -32603. */
-const errorOf = (cause: Cause.Cause<unknown>): JsonRpcError => {
+const errorOf = (cause: Cause.Cause<unknown>): JsonRpcErrorObject => {
   const failed = Cause.findError(cause);
-  if (Result.isSuccess(failed) && isJsonRpcError(failed.success)) return failed.success;
+  if (Result.isSuccess(failed) && isJsonRpcErrorObject(failed.success)) return failed.success;
   if (Cause.hasInterrupts(cause)) return { code: ErrorCode.RequestCancelled, message: "Request cancelled" };
   return internalError;
 };
@@ -205,7 +210,7 @@ const errorOf = (cause: Cause.Cause<unknown>): JsonRpcError => {
  * The response to request `id` once its handler has exited. A result its schema cannot encode is
  * -32603; a notification's handler, run for a request, answers `null`.
  */
-const responseOf = (id: JsonRpcId | null, method: Methods.Any, exit: Exit.Exit<unknown, JsonRpcError>): JsonRpcResponse => {
+const responseOf = (id: JsonRpcId | null, method: Methods.Any, exit: Exit.Exit<unknown, JsonRpcErrorObject>): JsonRpcResponse => {
   if (Exit.isFailure(exit)) return failure(id, errorOf(exit.cause));
   if (method._tag === "Notification") return success(id, null);
   const encoded = Schema.encodeUnknownExit(json(method.result))(exit.value);
@@ -225,11 +230,13 @@ const resultOf = (method: Methods.Request, result: unknown): Exit.Exit<unknown, 
     const empty = decode({});
     if (Exit.isSuccess(empty)) return Exit.succeed(empty.value);
   }
-  return Exit.fail({
-    code: ErrorCode.InternalError,
-    message: `The result does not match ${method.name}'s schema`,
-    data: { result, issue: String(Cause.squash(decoded.cause)) },
-  });
+  return Exit.fail(
+    new JsonRpcError({
+      code: ErrorCode.InternalError,
+      message: `The result does not match ${method.name}'s schema`,
+      data: { result, issue: String(Cause.squash(decoded.cause)) },
+    }),
+  );
 };
 
 /**
@@ -338,12 +345,12 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
   const handlers = yield* options.handlers(peer).pipe(Effect.forkIn(scope));
 
   /** Runs `method`'s handler on `payload`; its exit goes to `answer`, if one is given. */
-  const handle = (method: Methods.Any, payload: unknown, answer?: (exit: Exit.Exit<unknown, JsonRpcError>) => Effect.Effect<void>) =>
+  const handle = (method: Methods.Any, payload: unknown, answer?: (exit: Exit.Exit<unknown, JsonRpcErrorObject>) => Effect.Effect<void>) =>
     Fiber.join(handlers).pipe(
       Effect.flatMap((built) => {
         const handler = (built as ErasedHandlers<R>)[method.name];
         if (handler === undefined)
-          return Effect.fail<JsonRpcError>({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method.name}` });
+          return Effect.fail(new JsonRpcError({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method.name}` }));
         return handler(payload);
       }),
       Effect.onExit((exit) => answer?.(exit) ?? Effect.void),
@@ -368,11 +375,11 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
         const call = take(message.id);
         const answered = Effect.succeed(now(failure(null, invalidRequest)));
         if (call === undefined) return answered;
-        const error: JsonRpcError = {
+        const error = new JsonRpcError({
           code: ErrorCode.InvalidRequest,
           message: "The response to this request is malformed",
           data: { response: value },
-        };
+        });
         return Deferred.fail(call.answer, error).pipe(Effect.andThen(answered));
       }
       case "Success":
@@ -380,7 +387,7 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
         // A response to no request of this end's, or to one already answered or cancelled, is dropped.
         const call = take(message.id);
         if (call === undefined) return Effect.succeed(none);
-        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(exactly(message.error));
+        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(new JsonRpcError(exactly(message.error)));
         return Deferred.done(call.answer, exit).pipe(Effect.as(none));
       }
       case "Notification":

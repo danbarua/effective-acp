@@ -30,7 +30,7 @@ import {
   isRequest,
   isResponse,
   isResponseShaped,
-  type JsonRpcError,
+  type JsonRpcErrorObject,
   type Wire,
   type WireInput,
 } from "./json-rpc.ts";
@@ -143,9 +143,13 @@ export class UnsupportedProtocolVersion extends Data.TaggedError("UnsupportedPro
 /** `initialize` got no usable answer: the wire failed or closed, the agent answered an error or a malformed response, or a result the answered version's schema refuses. */
 export class InitializeFailed extends Data.TaggedError("InitializeFailed")<{
   readonly reason: string;
-  readonly error?: JsonRpcError | undefined;
+  readonly error?: JsonRpcErrorObject | undefined;
   readonly cause?: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return this.reason;
+  }
+}
 
 export interface ConnectOptions<Impls extends ReadonlyArray<AnyClientImplementation>> {
   readonly wire: Wire;
@@ -232,7 +236,7 @@ export const connect = <const Impls extends Implementations>(
         return yield* new InitializeFailed({ reason: "the connection closed before initialize was answered" });
       const response = yield* Deferred.await(answered);
       if ("error" in response)
-        return yield* new InitializeFailed({ reason: "the agent answered initialize with an error", error: response["error"] as JsonRpcError });
+        return yield* new InitializeFailed({ reason: "the agent answered initialize with an error", error: response["error"] as JsonRpcErrorObject });
       const version = readProtocolVersion(response["result"]);
       if (version === undefined)
         return yield* new InitializeFailed({ reason: "the agent's answer to initialize has no protocolVersion" });

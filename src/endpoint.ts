@@ -13,7 +13,7 @@
  */
 
 import { type Cause, Deferred, Effect, Queue, type Scope, Stream } from "effect";
-import { ErrorCode, type JsonRpcError, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
+import { ErrorCode, JsonRpcError, type JsonRpcErrorObject, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Methods from "./methods.ts";
 import * as Peer from "./peer.ts";
@@ -31,7 +31,7 @@ import {
 export type Side = "agent" | "client";
 
 /** A handler of a method this end serves, its payload erased; `R` is the services it needs. */
-export type AnyHandler<R> = (payload: never) => Effect.Effect<unknown, JsonRpcError, R>;
+export type AnyHandler<R> = (payload: never) => Effect.Effect<unknown, JsonRpcErrorObject, R>;
 
 /** Handlers by method name for any subset of the methods `M`. */
 export type Handlers<M extends Methods.Any, R> = Partial<Methods.Handlers<M, R>>;
@@ -211,13 +211,15 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
     /** Answers an incoming method: the gates first, then its handler, if it has one. */
     const handlerFor =
       (method: string, handlers: Readonly<Record<string, AnyHandler<R> | undefined>>) =>
-      (payload: unknown): Effect.Effect<unknown, JsonRpcError, R> => {
+      (payload: unknown): Effect.Effect<unknown, JsonRpcErrorObject, R> => {
         if (side === "agent" && method === "initialize")
-          return Effect.fail({
-            code: ErrorCode.InvalidRequest,
-            message: "The connection is already initialized",
-            data: { reason: "already_initialized" },
-          });
+          return Effect.fail(
+            new JsonRpcError({
+              code: ErrorCode.InvalidRequest,
+              message: "The connection is already initialized",
+              data: { reason: "already_initialized" },
+            }),
+          );
         const gate = adapter.gate(incoming, method, payload, profile);
         if (gate._tag === "Refused") {
           const error = refusalError(gate);
@@ -230,7 +232,7 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
         }
         const handler = handlers[method];
         if (handler === undefined)
-          return Effect.fail({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method}` });
+          return Effect.fail(new JsonRpcError({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method}` }));
         return handler(payload as never);
       };
 

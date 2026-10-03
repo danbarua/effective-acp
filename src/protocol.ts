@@ -15,7 +15,7 @@
  */
 
 import { Data, Predicate, Schema } from "effect";
-import { ErrorCode, type JsonRpcError } from "./json-rpc.ts";
+import { ErrorCode, JsonRpcError } from "./json-rpc.ts";
 import type * as Methods from "./methods.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V1Rpcs from "./schema/v1.rpcs.gen.ts";
@@ -174,11 +174,12 @@ export class CapabilityNotAdvertised extends Data.TaggedError("CapabilityNotAdve
 }> {}
 
 /** The JSON-RPC error a refusal answers an incoming request with: -32601 or -32602, naming the capability. */
-export const refusalError = (refused: Refused): JsonRpcError => ({
-  code: refused.needs === "method" ? ErrorCode.MethodNotFound : ErrorCode.InvalidParams,
-  message: refused.message,
-  data: { capability: refused.capability },
-});
+export const refusalError = (refused: Refused): JsonRpcError =>
+  new JsonRpcError({
+    code: refused.needs === "method" ? ErrorCode.MethodNotFound : ErrorCode.InvalidParams,
+    message: refused.message,
+    data: { capability: refused.capability },
+  });
 
 /** ACP reserves method names that start with `_` for extensions. No gate stands in front of them. */
 export const isExtensionMethod = (method: string): boolean => method.startsWith("_");

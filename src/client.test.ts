@@ -16,9 +16,10 @@ import type * as HttpClient from "effect/http/HttpClient";
 import * as Agent from "./agent.ts";
 import * as Client from "./client.ts";
 import * as Http from "./http.ts";
-import type { Wire } from "./json-rpc.ts";
+import { JsonRpcError, type Wire } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Methods from "./methods.ts";
+import { PeerClosed } from "./methods.ts";
 import {
   AgentExtensions,
   type AgentWithExtensions,
@@ -420,12 +421,44 @@ describe("decoding over the wire", () => {
       }),
     );
     expect(Exit.isFailure(refused) && refused.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail"]);
-    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toEqual({
+    const error = Exit.isFailure(refused) ? Cause.squash(refused.cause) : undefined;
+    expect(error).toBeInstanceOf(JsonRpcError);
+    expect(error).toMatchObject({
       code: -32603,
       message: "The result does not match session/new's schema",
       data: { result: { sessionId: 42 }, issue: expect.any(String) },
     });
     expect(after).toEqual({ sessionId: V1.SessionId.make("sdk-session") });
+  });
+});
+
+describe("errors a caller gets", () => {
+  test("AP4: a call the other end answers with an error fails with a JsonRpcError, an Error whose message is the agent's message, with its code and data", async () => {
+    const ends = pipes();
+    acp
+      .agent({ name: "an-sdk-agent" })
+      .onRequest("initialize", () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [] }))
+      .onRequest("session/new", () => {
+        throw new acp.RequestError(-32042, "Refused by the agent", { asked: "new" });
+      })
+      .connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+    const failed = await run(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [clientV1([])] });
+        return yield* Effect.flip(connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] }));
+      }),
+    );
+    expect(failed).toBeInstanceOf(JsonRpcError);
+    expect(failed).toBeInstanceOf(Error);
+    expect(failed.message).toBe("Refused by the agent");
+    expect(failed).toMatchObject({ code: -32042, data: { asked: "new" } });
+  });
+
+  test("AP4: PeerClosed and InitializeFailed have their reason as their message", () => {
+    expect(new PeerClosed({ reason: "The connection closed" }).message).toBe("The connection closed");
+    expect(new Client.InitializeFailed({ reason: "the agent answered initialize with an error" }).message).toBe(
+      "the agent answered initialize with an error",
+    );
   });
 });
 
@@ -582,7 +615,9 @@ describe("extension methods", () => {
       }),
     );
     await agent.stop();
-    expect(result).toEqual({ echoed: { text: "ready?: yes" }, unknown: { code: -32601, message: "Method not found: _an/unknown" } });
+    expect(result.echoed).toEqual({ text: "ready?: yes" });
+    expect(result.unknown).toBeInstanceOf(JsonRpcError);
+    expect(result.unknown).toMatchObject({ code: -32601, message: "Method not found: _an/unknown" });
     expect(seen).toEqual(["progress: echoing ready?", "ask: ready?"]);
     expect(pinged).toEqual(["hello"]);
   });

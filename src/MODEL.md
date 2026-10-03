@@ -73,10 +73,12 @@ reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newlin
 - AP3. An incoming `$/cancel_request` interrupts the handler of the request it names, and that
   request is answered with -32800. A `$/cancel_request` for an id that is unknown or already
   answered is ignored.
-- AP4. A handler that fails with a `JsonRpcError` answers its request with that error: code,
-  message and data as given, and nothing else. A failure value with more to it (a tagged error
-  class shaped like a `JsonRpcError`) goes out as its `code`, `message` and `data` only, with no
-  `_tag` or other field; an error response reaches the caller the same way.
+- AP4. A handler that fails with a JSON-RPC error (a `JsonRpcError`, or any value shaped like one:
+  a plain `{ code, message, data }` or a tagged error class) answers its request with that error:
+  its `code`, `message` and `data` as given, and no `_tag` or other field. A call the other end
+  answers with an error fails with a `JsonRpcError`: an `Error` whose `message` is the other end's
+  message, with its `code` and `data`. `PeerClosed` and `InitializeFailed` have their reason as
+  their `message`.
 - AP5. A handler that dies answers its own request with -32603, and the connection goes on.
 - AP6. An unknown method is answered -32601, and params the method's payload schema refuses are
   answered -32602. Both are answered before any handler runs. A notification gets no response: one

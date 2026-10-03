@@ -9,7 +9,7 @@
  */
 
 import { Data, type Effect, type Schema } from "effect";
-import type { JsonRpcError } from "./json-rpc.ts";
+import type { JsonRpcError, JsonRpcErrorObject } from "./json-rpc.ts";
 
 export interface Request<Name extends string = string, Params extends Schema.Top = Schema.Top, Result extends Schema.Top = Schema.Top> {
   readonly _tag: "Request";
@@ -73,13 +73,17 @@ export type Result<M extends Any> = M extends Request<string, Schema.Top, infer 
  * with. Keyed by name, not mapped over the methods, so that a handler record never decides `M`.
  */
 export type Handlers<M extends Any, R> = {
-  readonly [Name in M["name"]]: (params: Params<Named<M, Name>>) => Effect.Effect<Result<Named<M, Name>>, JsonRpcError, R>;
+  readonly [Name in M["name"]]: (params: Params<Named<M, Name>>) => Effect.Effect<Result<Named<M, Name>>, JsonRpcErrorObject, R>;
 };
 
 /** A call to the other end got no answer: the connection closed first, or the request could not be written. */
 export class PeerClosed extends Data.TaggedError("PeerClosed")<{
   readonly reason: string;
-}> {}
+}> {
+  override get message(): string {
+    return this.reason;
+  }
+}
 
 /**
  * Calls to the requests of `M`, by name. A call fails with the `JsonRpcError` the other end answers,

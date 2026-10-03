@@ -27,13 +27,24 @@ export const ErrorCode = {
   ResourceNotFound: -32002,
 } as const;
 
-/** A JSON-RPC error: what a handler fails with, and what a call to the other end fails with when it answers with an error. */
-export const JsonRpcError = Schema.Struct({
+/** A JSON-RPC error object as it goes over the wire: its code, message and data, and nothing else. */
+export const JsonRpcErrorObject = Schema.Struct({
   code: Schema.Int,
   message: Schema.String,
   data: Schema.optionalKey(Schema.Unknown),
 });
-export type JsonRpcError = typeof JsonRpcError.Type;
+export type JsonRpcErrorObject = typeof JsonRpcErrorObject.Type;
+
+/**
+ * A JSON-RPC error: what a handler fails with, and what a call to the other end fails with when it
+ * answers with an error. An `Error` whose `message` is the error's message. Written to the wire, it
+ * is the object of its `code`, `message` and `data` alone.
+ */
+export class JsonRpcError extends Data.TaggedError("JsonRpcError")<{
+  readonly code: number;
+  readonly message: string;
+  readonly data?: unknown;
+}> {}
 
 export interface JsonRpcRequest {
   readonly jsonrpc: "2.0";
@@ -57,7 +68,7 @@ export interface JsonRpcSuccess {
 export interface JsonRpcFailure {
   readonly jsonrpc: "2.0";
   readonly id: JsonRpcId | null;
-  readonly error: JsonRpcError;
+  readonly error: JsonRpcErrorObject;
 }
 
 export type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;

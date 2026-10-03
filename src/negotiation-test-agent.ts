@@ -16,7 +16,7 @@
 
 import { Effect, Schema } from "effect";
 import * as Agent from "./agent.ts";
-import type { JsonRpcError } from "./json-rpc.ts";
+import type { JsonRpcErrorObject } from "./json-rpc.ts";
 import * as Methods from "./methods.ts";
 import * as Protocol from "./protocol.ts";
 import * as V1 from "./schema/v1.gen.ts";
@@ -41,7 +41,7 @@ export function textOf(update: unknown): string | undefined {
 const reported = (error: { readonly _tag?: string; readonly capability?: string; readonly code?: number }): string =>
   error._tag === "CapabilityNotAdvertised" ? `Refused: ${error.capability}` : `Failed: ${error.code ?? error._tag}`;
 
-const internal = (error: unknown): JsonRpcError => ({ code: -32603, message: "Internal error", data: String(error) });
+const internal = (error: unknown): JsonRpcErrorObject => ({ code: -32603, message: "Internal error", data: String(error) });
 
 /** The extension methods the agent serves. */
 export const AgentExtensions = Methods.make(

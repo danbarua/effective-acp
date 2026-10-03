@@ -28,7 +28,7 @@ import {
   ErrorCode,
   isJsonRpcId,
   isRequest,
-  type JsonRpcError,
+  type JsonRpcErrorObject,
   type JsonRpcId,
   type JsonRpcResponse,
   type Wire,
@@ -156,13 +156,13 @@ export interface RunOptions<Impls extends ReadonlyArray<AnyAgentImplementation>>
 
 type Implementations = readonly [AnyAgentImplementation, ...Array<AnyAgentImplementation>];
 
-const notInitialized: JsonRpcError = {
+const notInitialized: JsonRpcErrorObject = {
   code: ErrorCode.InvalidRequest,
   message: "The connection is not initialized",
   data: { reason: "not_initialized" },
 };
 
-const failure = (id: JsonRpcId | null, error: JsonRpcError): JsonRpcResponse => ({ jsonrpc: "2.0", id, error });
+const failure = (id: JsonRpcId | null, error: JsonRpcErrorObject): JsonRpcResponse => ({ jsonrpc: "2.0", id, error });
 
 interface Negotiated<R> {
   readonly implementation: AgentImplementation<Version, R>;
