@@ -13,11 +13,17 @@ where it does not, in [`src/EFFECT-FIT.md`](src/EFFECT-FIT.md).
 ## Install
 
 ```sh
-bun add github:danbarua/effective-acp#<commit>
+bun add effective-acp effect   # or: npm install effective-acp effect
 ```
 
 `effect` is a peer dependency (`^4.0.0`): the application provides it, so the library and the
-application share one copy of Effect. The package is TypeScript source, for Bun.
+application share one copy of Effect.
+
+Each module is exported with three conditions: `bun` resolves to the TypeScript source, `types` to
+the declarations, and `default` to the built JavaScript, for Node. A Bun project that typechecks
+against the source instead of the declarations sets `"customConditions": ["bun"]` in its
+`tsconfig.json`; it then needs no build, which is how a project can depend on a commit
+(`github:danbarua/effective-acp#<commit>`) before it is published.
 
 ## Modules
 
@@ -40,7 +46,15 @@ application share one copy of Effect. The package is TypeScript source, for Bun.
 ```sh
 bun install
 bun run check        # typecheck, lint, every rule has a test, tests
+bun run build        # dist/: JavaScript and declarations, for Node
 bun run acp:schema   # regenerate src/schema/*.gen.ts from the installed SDK's JSON Schemas
 ```
 
+CI runs the check and the build on every push and pull request. Pushing a tag `v<version>`, where
+`<version>` is `package.json`'s, publishes that version to npm (`.github/workflows/release.yml`).
+
 It began as `src/acp` in labkit-effect; its history came with it.
+
+## License
+
+MIT

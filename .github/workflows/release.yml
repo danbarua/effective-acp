@@ -1,0 +1,35 @@
+name: Release
+
+# Publishes to npm when a tag `v<version>` is pushed whose version is package.json's.
+# Authentication: npm trusted publishing (OIDC) once the package is set up for it on npmjs.com;
+# until then, an automation token in the repository secret NPM_TOKEN.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@latest
+      - name: The tag names package.json's version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

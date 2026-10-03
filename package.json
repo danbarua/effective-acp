@@ -2,26 +2,95 @@
   "name": "effective-acp",
   "version": "0.1.0",
   "description": "The Agent Client Protocol on Effect: schemas generated from the SDK's JSON Schemas, a two-way JSON-RPC peer, the agent and client ends, stdio and Streamable HTTP.",
+  "license": "MIT",
   "type": "module",
-  "repository": "github:danbarua/effective-acp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danbarua/effective-acp.git"
+  },
+  "homepage": "https://github.com/danbarua/effective-acp#readme",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "effect",
+    "json-rpc",
+    "agent"
+  ],
   "exports": {
-    "./agent": "./src/agent.ts",
-    "./client": "./src/client.ts",
-    "./endpoint": "./src/endpoint.ts",
-    "./http": "./src/http.ts",
-    "./json-rpc": "./src/json-rpc.ts",
-    "./log-keys": "./src/log-keys.ts",
-    "./methods": "./src/methods.ts",
-    "./peer": "./src/peer.ts",
-    "./protocol": "./src/protocol.ts",
-    "./stdio": "./src/stdio.ts",
-    "./schema/v1": "./src/schema/v1.gen.ts",
-    "./schema/v1.rpcs": "./src/schema/v1.rpcs.gen.ts",
-    "./schema/v2": "./src/schema/v2.gen.ts",
-    "./schema/v2.rpcs": "./src/schema/v2.rpcs.gen.ts"
+    "./agent": {
+      "bun": "./src/agent.ts",
+      "types": "./dist/agent.d.ts",
+      "default": "./dist/agent.js"
+    },
+    "./client": {
+      "bun": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./endpoint": {
+      "bun": "./src/endpoint.ts",
+      "types": "./dist/endpoint.d.ts",
+      "default": "./dist/endpoint.js"
+    },
+    "./http": {
+      "bun": "./src/http.ts",
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./json-rpc": {
+      "bun": "./src/json-rpc.ts",
+      "types": "./dist/json-rpc.d.ts",
+      "default": "./dist/json-rpc.js"
+    },
+    "./log-keys": {
+      "bun": "./src/log-keys.ts",
+      "types": "./dist/log-keys.d.ts",
+      "default": "./dist/log-keys.js"
+    },
+    "./methods": {
+      "bun": "./src/methods.ts",
+      "types": "./dist/methods.d.ts",
+      "default": "./dist/methods.js"
+    },
+    "./peer": {
+      "bun": "./src/peer.ts",
+      "types": "./dist/peer.d.ts",
+      "default": "./dist/peer.js"
+    },
+    "./protocol": {
+      "bun": "./src/protocol.ts",
+      "types": "./dist/protocol.d.ts",
+      "default": "./dist/protocol.js"
+    },
+    "./stdio": {
+      "bun": "./src/stdio.ts",
+      "types": "./dist/stdio.d.ts",
+      "default": "./dist/stdio.js"
+    },
+    "./schema/v1": {
+      "bun": "./src/schema/v1.gen.ts",
+      "types": "./dist/schema/v1.gen.d.ts",
+      "default": "./dist/schema/v1.gen.js"
+    },
+    "./schema/v1.rpcs": {
+      "bun": "./src/schema/v1.rpcs.gen.ts",
+      "types": "./dist/schema/v1.rpcs.gen.d.ts",
+      "default": "./dist/schema/v1.rpcs.gen.js"
+    },
+    "./schema/v2": {
+      "bun": "./src/schema/v2.gen.ts",
+      "types": "./dist/schema/v2.gen.d.ts",
+      "default": "./dist/schema/v2.gen.js"
+    },
+    "./schema/v2.rpcs": {
+      "bun": "./src/schema/v2.rpcs.gen.ts",
+      "types": "./dist/schema/v2.rpcs.gen.d.ts",
+      "default": "./dist/schema/v2.rpcs.gen.js"
+    }
   },
   "files": [
     "src",
+    "dist",
     "!src/**/*.test.ts",
     "!src/*-test-agent*.ts"
   ],
@@ -31,7 +100,9 @@
     "lint": "oxlint --type-aware --format default src scripts",
     "check:rules": "bun scripts/check-rules.ts",
     "check": "bun run typecheck && bun run lint && bun run check:rules && bun test",
-    "acp:schema": "bun scripts/acp-schema.ts"
+    "acp:schema": "bun scripts/acp-schema.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run check && bun run build"
   },
   "peerDependencies": {
     "effect": "^4.0.0"
