@@ -18,7 +18,7 @@ fails when a rule has none.
 `schema/v1.gen.ts` and `schema/v2.gen.ts` are generated from the SDK's JSON Schemas by
 `scripts/acp-schema.ts` (`bun run acp:schema`); do not edit them by hand.
 
-- AS1. `src/acp/schema/v1.gen.ts`, `v2.gen.ts`, `v1.rpcs.gen.ts` and `v2.rpcs.gen.ts` are exactly
+- AS1. `src/schema/v1.gen.ts`, `v2.gen.ts`, `v1.rpcs.gen.ts` and `v2.rpcs.gen.ts` are exactly
   what `scripts/acp-schema.ts` (`bun run acp:schema`) makes from the installed
   `@agentclientprotocol/sdk`'s `schema/schema.json` (protocol version 1) and
   `schema/v2/schema.unstable.json` (protocol version 2). Every `$def` is an exported Schema and a

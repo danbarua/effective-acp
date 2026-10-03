@@ -1,6 +1,6 @@
 # Where Effect fits in the ACP library, and where it does not
 
-A running note, kept while building `src/acp` on `effect@4.0.0-rc.118`, and `4.0.0` since. Each entry says what we use
+A running note, kept while building effective-acp (first as `src/acp` in labkit-effect) on `effect@4.0.0-rc.118`, and `4.0.0` since. Each entry says what we use
 from Effect, what we write ourselves instead, and why. Paths under `effect/` are in
 `repos/effect/packages/effect/src/`.
 
@@ -48,7 +48,7 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
 
 ## Do not use Effect for
 
-- **Reading and writing JSON-RPC: `RpcSerialization.ndJsonRpc`.** `src/acp` uses neither half.
+- **Reading and writing JSON-RPC: `RpcSerialization.ndJsonRpc`.** effective-acp uses neither half.
   - Its decoder drops what the library must answer. A line that is not JSON is swallowed
     (`rpc/RpcSerialization.ts`, `try { items.push(JSON.parse(line)) } catch {}`), and a message
     that is not an object is skipped (`decodeJsonRpcRaw`). So -32700 and -32600 for those could
@@ -61,7 +61,7 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
   No ACP peer understands that dialect, so `peer.ts` writes every message itself.
 - **Declaring, serving and calling JSON-RPC methods: `Rpc`, `RpcGroup`, `RpcServer` and
   `RpcClient`.** Effect's RPC is an Effect-to-Effect protocol (used by its cluster); a JSON-RPC peer
-  fits the primitives. `src/acp` imports nothing from `effect/rpc`.
+  fits the primitives. effective-acp imports nothing from `effect/rpc`.
   - `Rpc` declares an error schema per method, besides middleware, streaming and services. ACP has
     no per-method error: every request's error is `JsonRpcError`. `methods.ts` declares a method
     as its name, its params schema and, for a request, its result schema, and types handlers and

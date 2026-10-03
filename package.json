@@ -1,0 +1,49 @@
+{
+  "name": "effective-acp",
+  "version": "0.1.0",
+  "description": "The Agent Client Protocol on Effect: schemas generated from the SDK's JSON Schemas, a two-way JSON-RPC peer, the agent and client ends, stdio and Streamable HTTP.",
+  "type": "module",
+  "repository": "github:danbarua/effective-acp",
+  "exports": {
+    "./agent": "./src/agent.ts",
+    "./client": "./src/client.ts",
+    "./endpoint": "./src/endpoint.ts",
+    "./http": "./src/http.ts",
+    "./json-rpc": "./src/json-rpc.ts",
+    "./log-keys": "./src/log-keys.ts",
+    "./methods": "./src/methods.ts",
+    "./peer": "./src/peer.ts",
+    "./protocol": "./src/protocol.ts",
+    "./stdio": "./src/stdio.ts",
+    "./schema/v1": "./src/schema/v1.gen.ts",
+    "./schema/v1.rpcs": "./src/schema/v1.rpcs.gen.ts",
+    "./schema/v2": "./src/schema/v2.gen.ts",
+    "./schema/v2.rpcs": "./src/schema/v2.rpcs.gen.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/*-test-agent*.ts"
+  ],
+  "scripts": {
+    "prepare": "effect-tsgo patch --oxlint",
+    "typecheck": "tsc --noEmit -p .",
+    "lint": "oxlint --type-aware --format default src scripts",
+    "check:rules": "bun scripts/check-rules.ts",
+    "check": "bun run typecheck && bun run lint && bun run check:rules && bun test",
+    "acp:schema": "bun scripts/acp-schema.ts"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@effect/platform-bun": "4.0.0",
+    "@effect/tsgo": "^0.46.1",
+    "@types/bun": "latest",
+    "effect": "^4.0.0",
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "7.0.2"
+  }
+}

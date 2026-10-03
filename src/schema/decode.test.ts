@@ -1,9 +1,8 @@
-import { expect } from "bun:test";
+import { expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
 import { Exit, Schema } from "effect";
-import * as zodV1 from "../../../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js";
-import * as zodV2 from "../../../node_modules/@agentclientprotocol/sdk/dist/v2/schema/zod.gen.js";
-import { test } from "../../../tests/support/test.ts";
+import * as zodV1 from "../../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js";
+import * as zodV2 from "../../node_modules/@agentclientprotocol/sdk/dist/v2/schema/zod.gen.js";
 import * as v1 from "./v1.gen.ts";
 import * as v1Rpcs from "./v1.rpcs.gen.ts";
 import * as v2 from "./v2.gen.ts";

@@ -1,10 +1,9 @@
-import { expect, setDefaultTimeout } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { Effect, Exit, Schema } from "effect";
 import * as Arbitrary from "effect/Arbitrary";
-import * as zodV1 from "../../../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js";
-import * as zodV2 from "../../../node_modules/@agentclientprotocol/sdk/dist/v2/schema/zod.gen.js";
-import { installed } from "../../../scripts/acp-schema.ts";
-import { test } from "../../../tests/support/test.ts";
+import * as zodV1 from "../../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js";
+import * as zodV2 from "../../node_modules/@agentclientprotocol/sdk/dist/v2/schema/zod.gen.js";
+import { installed } from "../../scripts/acp-schema.ts";
 import * as v1 from "./v1.gen.ts";
 import * as v2 from "./v2.gen.ts";
 

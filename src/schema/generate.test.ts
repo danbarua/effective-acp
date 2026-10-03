@@ -1,11 +1,10 @@
-import { expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_METHODS, CLIENT_METHODS, PROTOCOL_METHODS } from "@agentclientprotocol/sdk";
 import * as sdkV2 from "@agentclientprotocol/sdk/experimental/v2";
 import { Schema } from "effect";
-import { generate, installed } from "../../../scripts/acp-schema.ts";
-import { test } from "../../../tests/support/test.ts";
+import { generate, installed } from "../../scripts/acp-schema.ts";
 import * as v1 from "./v1.rpcs.gen.ts";
 import * as v2 from "./v2.rpcs.gen.ts";
 
@@ -41,10 +40,10 @@ test("AS1: the generated files are what scripts/acp-schema.ts makes from the ins
   const { sdkVersion, documents } = installed(root);
   const files = generate(sdkVersion, documents);
   expect(files.map((file) => file.path).sort()).toEqual([
-    "src/acp/schema/v1.gen.ts",
-    "src/acp/schema/v1.rpcs.gen.ts",
-    "src/acp/schema/v2.gen.ts",
-    "src/acp/schema/v2.rpcs.gen.ts",
+    "src/schema/v1.gen.ts",
+    "src/schema/v1.rpcs.gen.ts",
+    "src/schema/v2.gen.ts",
+    "src/schema/v2.rpcs.gen.ts",
   ]);
   for (const file of files) expect({ path: file.path, content: readFileSync(join(root, file.path), "utf8") }).toEqual(file);
 });
