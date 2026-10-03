@@ -245,27 +245,53 @@ const numberId = "acp/number";
 /** The helpers a generated module may call, each emitted only when used. */
 const helpers = {
   defaultOnError: {
-    imports: ["Effect", "Option"],
+    imports: ["Effect", "Option", "SchemaIssue"],
+    logs: true,
     code: `/**
  * Decodes as \`schema\`, except that a value that is present and fails to decode becomes \`fallback\`,
- * or is left out when there is no fallback. A required key that is missing still fails. Encoding is
- * unchanged.
+ * or is left out when there is no fallback, and the replacement is logged as a warning. A required
+ * key that is missing still fails. Encoding is unchanged.
  */
+const formatIssue = SchemaIssue.makeFormatterDefault();
+
 const defaultOnError = <S extends Schema.Top>(schema: S, ...fallback: readonly [] | readonly [S["Type"]]) =>
   schema.pipe(
     Schema.catchDecoding((issue) =>
-      issue._tag === "MissingKey" ? Effect.fail(issue) : Effect.succeed(fallback.length === 0 ? Option.none() : Option.some(fallback[0])),
+      issue._tag === "MissingKey"
+        ? Effect.fail(issue)
+        : Effect.logWarning(logKeys.schema.fieldReplaced, {
+            issue: formatIssue(issue),
+            replacement: fallback.length === 0 ? "left out" : fallback[0],
+          }).pipe(Effect.as(fallback.length === 0 ? Option.none() : Option.some(fallback[0]))),
     ),
   );`,
   },
   skipInvalidItems: {
-    imports: ["Option", "SchemaGetter"],
-    code: `/** An array that decodes by dropping the items that fail to decode as \`item\`. Encoding refuses an invalid item. */
+    imports: ["Cause", "Effect", "Exit", "Logger", "SchemaGetter"],
+    logs: true,
+    code: `/**
+ * An array that decodes by dropping the items that fail to decode as \`item\`, logging a warning
+ * that names each one. Each item is checked with logging off, as the kept items are decoded again,
+ * and that decode logs. Encoding refuses an invalid item.
+ */
 const skipInvalidItems = <S extends Schema.Top & Schema.ConstraintDecoder<unknown>>(item: S) => {
-  const decode = Schema.decodeUnknownOption(item);
+  const check = (value: unknown) =>
+    Schema.decodeUnknownEffect(item)(value).pipe(Effect.exit, Effect.provide(Logger.layer([])));
   return Schema.Array(Schema.Unknown).pipe(
     Schema.decodeTo(Schema.Array(item), {
-      decode: SchemaGetter.transform((items) => items.filter((value): value is S["Encoded"] => Option.isSome(decode(value)))),
+      decode: SchemaGetter.transformEffect((items: ReadonlyArray<unknown>) =>
+        Effect.gen(function* () {
+          const kept: Array<S["Encoded"]> = [];
+          const dropped: Array<{ readonly index: number; readonly item: unknown; readonly issue: string }> = [];
+          for (const [index, value] of items.entries()) {
+            const exit = yield* check(value);
+            if (Exit.isSuccess(exit)) kept.push(value as S["Encoded"]);
+            else dropped.push({ index, item: value, issue: String(Cause.squash(exit.cause)) });
+          }
+          if (dropped.length > 0) yield* Effect.logWarning(logKeys.schema.itemsDropped, { dropped });
+          return kept;
+        }),
+      ),
       encode: SchemaGetter.passthroughSubtype(),
     }),
   );
@@ -574,6 +600,7 @@ function schemasModule(version: (typeof versions)[number], sdkVersion: string, i
   const values = ["Schema", ...new Set(helperNames.flatMap((name) => helpers[name].imports))].sort();
   const imports = [
     `import { ${values.join(", ")} } from "effect";`,
+    ...(helperNames.some((name) => "logs" in helpers[name]) ? [`import { logKeys } from "../log-keys.ts";`] : []),
     ...(brands.size === 0 ? [] : [`import type * as Brand from "effect/Brand";`]),
     ...generated.artifacts.flatMap((artifact) => (artifact._tag === "Import" ? [artifact.importDeclaration.replace(/;?$/, ";")] : [])),
   ];

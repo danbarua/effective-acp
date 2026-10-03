@@ -469,7 +469,7 @@ describe("transports", () => {
 });
 
 describe("logs", () => {
-  test("AN9: initialize is logged at Info with the versions offered and chosen; an incoming refusal at Info with its method and capability; a local refusal at Debug", async () => {
+  test("AN9: initialize is logged at Info with the versions offered and chosen; an incoming refusal at Warning with its method and capability; a local refusal at Debug", async () => {
     const agent = start([v1(), v2()]);
     const client = raw(agent);
     await client.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 3, info: clientInfo } });
@@ -492,7 +492,7 @@ describe("logs", () => {
     });
     await gated.stop();
     expect(gated.logged).toContainEqual({
-      level: "Info",
+      level: "Warn",
       message: [
         logKeys.gate.refusedIncoming,
         { side: "agent", method: "session/load", capability: "agentCapabilities.loadSession", code: -32601 },
@@ -502,7 +502,11 @@ describe("logs", () => {
       level: "Debug",
       message: [logKeys.gate.refusedLocally, { side: "agent", method: "fs/read_text_file", capability: "clientCapabilities.fs.readTextFile" }],
     });
-    expect(gated.logged.filter((line) => line.level === "Warn" || line.level === "Error")).toEqual([]);
+    expect(
+      gated.logged.filter(
+        (line) => (line.level === "Warn" || line.level === "Error") && (line.message as ReadonlyArray<unknown>)[0] !== logKeys.gate.refusedIncoming,
+      ),
+    ).toEqual([]);
   });
 });
 

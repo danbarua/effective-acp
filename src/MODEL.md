@@ -56,6 +56,10 @@ fails when a rule has none.
 - AS9. A `uri` is a string that `URL` parses once trimmed. A `date-time` matches the SDK's RFC 3339
   pattern (seconds required, `Z` or an offset). An integer format (`uint16`, `uint32`, `int32`, …)
   is bounded to its range. Each of these is checked as the SDK's zod schema checks it.
+- AS10. What AS5 and AS6 replace or drop is logged as a warning, to the logger of the fiber that
+  decodes the message: a replaced field as `acp.schema.field_replaced { issue, replacement }`
+  (`replacement` is `"left out"` when there is no default), and dropped items as
+  `acp.schema.items_dropped { dropped }`, each with its `index`, `item` and `issue`.
 
 ## The peer
 
@@ -127,6 +131,14 @@ reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newlin
   line the handler writes, and every one of what it forks, carries the annotation `request` with the
   request's id. `Peer.open` is `false` from when the wire's `read` ends, before pending calls fail
   and running handlers are interrupted (AP10).
+- AP16. What the peer drops or replaces is logged, with what it dropped or replaced. As a warning:
+  a `null` result read as `{}` (`acp.peer.null_result { method }`), a notification whose params
+  fail to decode (`acp.peer.notification_dropped { method, reason, issue, params }`), a
+  notification handler's failure or death (`acp.peer.notification_failed { method, cause }`), and a
+  request handler's failure that is not a JSON-RPC error, which is answered -32603
+  (`acp.peer.handler_failed { method, cause }`). At Info, as both are routine: a notification no
+  handler serves (`acp.peer.notification_dropped { method, reason }`) and a response to no pending
+  call (`acp.peer.response_ignored { id }`). An interruption is not logged.
 
 ## Streamable HTTP
 
@@ -276,8 +288,9 @@ advertises it.
   SDK's `AcpServer`.
 - AN9. Answering `initialize` is logged at Info as `acp.initialize.negotiated`:
   `{ side: "agent", offered, chosen, supported }` on the agent, and `{ side: "client", offered,
-  chosen }` on the client. An incoming refusal is logged at Info as
-  `acp.gate.refused_incoming { side, method, capability, code }`. A local refusal is logged at
+  chosen }` on the client. An incoming refusal is logged at Warning as
+  `acp.gate.refused_incoming { side, method, capability, code }`: the other end sent what this end
+  said it does not take. A local refusal is logged at
   Debug as `acp.gate.refused_locally { side, method, capability }`. A routine exchange logs no
   Warning or Error.
 - AN10. Version 1's gates. From client to agent: `session/load` needs

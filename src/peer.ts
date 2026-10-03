@@ -62,6 +62,7 @@ import {
   type Wire,
   type WireInput,
 } from "./json-rpc.ts";
+import { logKeys } from "./log-keys.ts";
 import type * as Methods from "./methods.ts";
 import { PeerClosed } from "./methods.ts";
 
@@ -222,20 +223,23 @@ const responseOf = (id: JsonRpcId | null, method: Methods.Any, exit: Exit.Exit<u
  * `{}` when the schema accepts `{}`. A result the schema refuses is the `JsonRpcError` -32603
  * naming the method.
  */
-const resultOf = (method: Methods.Request, result: unknown): Exit.Exit<unknown, JsonRpcError> => {
-  const decode = Schema.decodeUnknownExit(json(method.result));
-  const decoded = decode(result);
-  if (Exit.isSuccess(decoded)) return Exit.succeed(decoded.value);
-  if (result === null) {
-    const empty = decode({});
-    if (Exit.isSuccess(empty)) return Exit.succeed(empty.value);
-  }
-  return Exit.fail(
+const resultOf = (method: Methods.Request, result: unknown): Effect.Effect<unknown, JsonRpcError> => {
+  const decode = Schema.decodeUnknownEffect(json(method.result));
+  const refused = (issue: unknown) =>
     new JsonRpcError({
       code: ErrorCode.InternalError,
       message: `The result does not match ${method.name}'s schema`,
-      data: { result, issue: String(Cause.squash(decoded.cause)) },
-    }),
+      data: { result, issue: String(issue) },
+    });
+  return decode(result).pipe(
+    Effect.catch((issue) =>
+      result === null
+        ? decode({}).pipe(
+            Effect.tap(() => Effect.logWarning(logKeys.peer.nullResult, { method: method.name })),
+            Effect.mapError(() => refused(issue)),
+          )
+        : Effect.fail(refused(issue)),
+    ),
   );
 };
 
@@ -344,6 +348,20 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
   // Built in the background, as a handler may call the other end, whose answer the reader must read.
   const handlers = yield* options.handlers(peer).pipe(Effect.forkIn(scope));
 
+  /**
+   * Logs a handler's failure that nothing else reports: a notification's failure, which has no one
+   * to answer, and a request handler's failure that is not a JSON-RPC error, which is answered
+   * -32603 without its cause. An interruption is not a failure.
+   */
+  const unheard = (method: Methods.Any, exit: Exit.Exit<unknown, unknown>, isNotification: boolean): Effect.Effect<void> => {
+    if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return Effect.void;
+    const failed = Cause.findError(exit.cause);
+    const answered = Result.isSuccess(failed) && isJsonRpcErrorObject(failed.success);
+    if (isNotification)
+      return Effect.logWarning(logKeys.peer.notificationFailed, { method: method.name, cause: Cause.pretty(exit.cause) });
+    return answered ? Effect.void : Effect.logWarning(logKeys.peer.handlerFailed, { method: method.name, cause: Cause.pretty(exit.cause) });
+  };
+
   /** Runs `method`'s handler on `payload`; its exit goes to `answer`, if one is given. */
   const handle = (method: Methods.Any, payload: unknown, answer?: (exit: Exit.Exit<unknown, JsonRpcErrorObject>) => Effect.Effect<void>) =>
     Fiber.join(handlers).pipe(
@@ -353,7 +371,7 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
           return Effect.fail(new JsonRpcError({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method.name}` }));
         return handler(payload);
       }),
-      Effect.onExit((exit) => answer?.(exit) ?? Effect.void),
+      Effect.onExit((exit) => Effect.andThen(unheard(method, exit, answer === undefined), answer?.(exit) ?? Effect.void)),
       Effect.exit,
     );
 
@@ -386,9 +404,13 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
       case "Failure": {
         // A response to no request of this end's, or to one already answered or cancelled, is dropped.
         const call = take(message.id);
-        if (call === undefined) return Effect.succeed(none);
-        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(new JsonRpcError(exactly(message.error)));
-        return Deferred.done(call.answer, exit).pipe(Effect.as(none));
+        if (call === undefined) return Effect.logInfo(logKeys.peer.responseIgnored, { id: message.id }).pipe(Effect.as(none));
+        const outcome =
+          message._tag === "Success" ? resultOf(call.method, message.result) : Effect.fail(new JsonRpcError(exactly(message.error)));
+        return Effect.exit(outcome).pipe(
+          Effect.flatMap((exit) => Deferred.done(call.answer, exit)),
+          Effect.as(none),
+        );
       }
       case "Notification":
       case "Request": {
@@ -397,19 +419,22 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
           return cancel(message.params).pipe(Effect.as(isRequest ? now(success(message.id, null)) : none));
         const method: Methods.Any | undefined = options.serve.byName.get(message.method);
         if (method === undefined)
-          return Effect.succeed(
-            isRequest
-              ? now(failure(message.id, { code: ErrorCode.MethodNotFound, message: `Method not found: ${message.method}` }))
-              : none,
-          );
+          return isRequest
+            ? Effect.succeed(now(failure(message.id, { code: ErrorCode.MethodNotFound, message: `Method not found: ${message.method}` })))
+            : Effect.logInfo(logKeys.peer.notificationDropped, { method: message.method, reason: "no handler serves it" }).pipe(
+                Effect.as(none),
+              );
         return Schema.decodeUnknownEffect(json(method.params))(message.params).pipe(
           Effect.matchEffect({
             onFailure: (error) =>
-              Effect.succeed(
-                isRequest
-                  ? now(failure(message.id, { code: ErrorCode.InvalidParams, message: "Invalid params", data: error.message }))
-                  : none,
-              ),
+              isRequest
+                ? Effect.succeed(now(failure(message.id, { code: ErrorCode.InvalidParams, message: "Invalid params", data: error.message })))
+                : Effect.logWarning(logKeys.peer.notificationDropped, {
+                    method: message.method,
+                    reason: "its params failed to decode",
+                    issue: error.message,
+                    params: message.params,
+                  }).pipe(Effect.as(none)),
             onSuccess: (payload): Effect.Effect<Reply<R>, never, R> => {
               if (!isRequest) return FiberSet.run(background, handle(method, payload)).pipe(Effect.as(none));
               const { id } = message;

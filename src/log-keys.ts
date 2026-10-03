@@ -8,6 +8,24 @@ export const logKeys = {
     /** `initialize` was answered: the details name the side, the version offered and the version chosen. */
     negotiated: "acp.initialize.negotiated",
   },
+  schema: {
+    /** A field the other end sent failed to decode, and the schema replaced it with its default or left it out. */
+    fieldReplaced: "acp.schema.field_replaced",
+    /** Items of a list the other end sent failed to decode, and were dropped from it: the details name each one. */
+    itemsDropped: "acp.schema.items_dropped",
+  },
+  peer: {
+    /** A call's result was `null`, which its schema refuses, and the caller got `{}` instead. */
+    nullResult: "acp.peer.null_result",
+    /** A notification was dropped: no handler serves its method, or its params failed to decode. */
+    notificationDropped: "acp.peer.notification_dropped",
+    /** A notification's handler failed or died; there is no one to answer. */
+    notificationFailed: "acp.peer.notification_failed",
+    /** A request's handler failed with something other than a JSON-RPC error, or died; the request was answered -32603. */
+    handlerFailed: "acp.peer.handler_failed",
+    /** A response arrived whose id matches no pending call, and was ignored. */
+    responseIgnored: "acp.peer.response_ignored",
+  },
   gate: {
     /** A request or notification from the other end needed a capability that was not advertised; it was answered with an error, or dropped. */
     refusedIncoming: "acp.gate.refused_incoming",

@@ -432,6 +432,95 @@ describe("decoding over the wire", () => {
   });
 });
 
+/** A logger that keeps what it is given, and the layer that installs it. */
+const capture = () => {
+  const logged: Array<{ readonly level: string; readonly message: ReadonlyArray<unknown> }> = [];
+  const layer = Logger.layer([
+    Logger.make((options) => logged.push({ level: options.logLevel, message: options.message as ReadonlyArray<unknown> })),
+  ]);
+  const under = (key: string) => logged.filter((entry) => entry.message[0] === key);
+  return { logged, layer, under };
+};
+
+describe("what is dropped or replaced is logged", () => {
+  test("AS10: a field the schema replaces and list items it drops are each logged as a warning, to the caller's logger, with the issue and what was dropped", async () => {
+    const annotations = { audience: ["user", 5, "assistant"], priority: "high" };
+    const ends = pipes();
+    acp
+      .agent({ name: "an-sdk-agent" })
+      .onRequest("initialize", () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [] }))
+      .onRequest("session/new", () => ({ sessionId: "sdk-session", modes: { currentModeId: "ask", availableModes: "none" } }) as never)
+      .onRequest("session/prompt", async (c) => {
+        const content = { type: "text", text: "hello", annotations } as unknown as acp.ContentBlock;
+        await c.client.notify("session/update", { sessionId: c.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content } });
+        return { stopReason: "end_turn" as const };
+      })
+      .connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+    const client = Client.implement(Protocol.v1, {
+      capabilities: {},
+      handlers: () => Effect.succeed({ "session/update": () => Effect.void }),
+    });
+    const { layer, under } = capture();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [client] });
+        const created = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+        yield* connection.agent["session/prompt"]({ sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    );
+    const replaced = under(logKeys.schema.fieldReplaced);
+    expect(replaced.map((entry) => entry.level)).toEqual(["Warn", "Warn"]);
+    expect(replaced.map((entry) => entry.message[1])).toEqual([
+      { issue: expect.any(String), replacement: [] },
+      { issue: expect.any(String), replacement: "left out" },
+    ]);
+    expect(under(logKeys.schema.itemsDropped)).toEqual([
+      { level: "Warn", message: [logKeys.schema.itemsDropped, { dropped: [{ index: 1, item: 5, issue: expect.any(String) }] }] },
+    ]);
+  });
+
+  test("AP16: a notification whose params fail to decode, and a notification handler that dies, are each logged as a warning", async () => {
+    const ends = pipes();
+    acp
+      .agent({ name: "an-sdk-agent" })
+      .onRequest("initialize", () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [] }))
+      .onRequest("session/new", () => ({ sessionId: "sdk-session" }))
+      .onRequest("session/prompt", async (c) => {
+        const sessionId = c.params.sessionId;
+        await c.client.notify("session/update", { sessionId, update: { sessionUpdate: "not_a_kind" } } as never);
+        await c.client.notify("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "die" } } });
+        return { stopReason: "end_turn" as const };
+      })
+      .connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+    const client = Client.implement(Protocol.v1, {
+      capabilities: {},
+      handlers: () => Effect.succeed({ "session/update": () => Effect.die("the handler died") }),
+    });
+    const { layer, under } = capture();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [client] });
+        const { sessionId } = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+        yield* connection.agent["session/prompt"]({ sessionId, prompt: [{ type: "text", text: "go" }] });
+        // The notifications' handlers run in the background.
+        yield* Effect.sleep("50 millis");
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    );
+    expect(under(logKeys.peer.notificationDropped)).toEqual([
+      {
+        level: "Warn",
+        message: [
+          logKeys.peer.notificationDropped,
+          { method: "session/update", reason: "its params failed to decode", issue: expect.any(String), params: expect.anything() },
+        ],
+      },
+    ]);
+    expect(under(logKeys.peer.notificationFailed)).toEqual([
+      { level: "Warn", message: [logKeys.peer.notificationFailed, { method: "session/update", cause: expect.stringContaining("the handler died") }] },
+    ]);
+  });
+});
+
 describe("errors a caller gets", () => {
   test("AP4: a call the other end answers with an error fails with a JsonRpcError, an Error whose message is the agent's message, with its code and data", async () => {
     const ends = pipes();

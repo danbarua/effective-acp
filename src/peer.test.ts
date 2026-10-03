@@ -6,7 +6,8 @@
 
 import { describe, expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
-import { Deferred, Effect, Exit, Fiber, Scope, Sink, Stdio, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Scope, Sink, Stdio, Stream } from "effect";
+import { logKeys } from "./log-keys.ts";
 import type { Wire } from "./json-rpc.ts";
 import { type AgentPeer, permissionRequest, runAgent } from "./peer-test-agent.ts";
 import { fromStdio, fromWebStreams } from "./stdio.ts";
@@ -29,7 +30,7 @@ interface Agent {
   readonly close: () => Promise<void>;
 }
 
-async function start(): Promise<Agent> {
+async function start(logger?: Layer.Layer<never>): Promise<Agent> {
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
   const toClient = new TransformStream<Uint8Array, Uint8Array>();
   const wire = fromWebStreams(toAgent.readable, toClient.writable);
@@ -43,7 +44,8 @@ async function start(): Promise<Agent> {
     ),
     write: (message) => Effect.suspend(() => (sent.push(JSON.stringify(message)), wire.write(message))),
   };
-  const peer = await Effect.runPromise(runAgent(recorded, probe).pipe(Scope.provide(scope)));
+  const running = runAgent(recorded, probe).pipe(Scope.provide(scope));
+  const peer = await Effect.runPromise(logger === undefined ? running : running.pipe(Effect.provide(logger)));
   return {
     peer,
     input: toAgent.writable,
@@ -503,6 +505,20 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     const asked = agent.sent.map((line) => JSON.parse(line)).find((message) => message.method === "_test/acknowledge");
     expect(agent.received.map((line) => JSON.parse(line))).toContainEqual({ jsonrpc: "2.0", id: asked.id, result: null });
     expect(log).toEqual(["update: Working.", "update: Acknowledged: {}"]);
+  });
+
+  test("AP16: a null result read as {} is logged as a warning naming the method", async () => {
+    const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+    const agent = await start(Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))]));
+    const raw = rawClient(agent);
+    await raw.send(request(1, "session/prompt", prompt("session-1", "acknowledge")));
+    expect(await raw.next()).toMatchObject({ method: "session/update" });
+    const asked = (await raw.next()) as { readonly id: number; readonly method: string };
+    await raw.send(`${JSON.stringify({ jsonrpc: "2.0", id: asked.id, result: null })}\n`);
+    expect(await raw.next()).toMatchObject({ params: { update: { content: { text: "Acknowledged: {}" } } } });
+    expect(await raw.next()).toEqual({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } });
+    await agent.close();
+    expect(logged).toContainEqual({ level: "Warn", message: [logKeys.peer.nullResult, { method: "_test/acknowledge" }] });
   });
 
   test("AP13: a null result becomes {} for a call whose success accepts {}, and fails with -32603 naming the method a call whose success refuses both", async () => {

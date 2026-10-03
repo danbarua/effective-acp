@@ -223,7 +223,7 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
         const gate = adapter.gate(incoming, method, payload, profile);
         if (gate._tag === "Refused") {
           const error = refusalError(gate);
-          return Effect.logInfo(logKeys.gate.refusedIncoming, {
+          return Effect.logWarning(logKeys.gate.refusedIncoming, {
             side,
             method,
             capability: gate.capability,
