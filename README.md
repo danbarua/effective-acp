@@ -58,6 +58,15 @@ to decode, a message the other end sent that this end did not advertise it takes
 whose params failed to decode, a handler's failure that no one would otherwise hear. `log-keys`
 names every event.
 
+## A reopened session's history
+
+Over Streamable HTTP, the answer to `session/load` and the history it replays come on different
+streams, and the transport's RFD does not order them, so the answer can arrive first. An agent built
+on this library puts in the answer's `_meta` how many updates it replayed
+(`effective-acp/replayed`); a client built on it completes the call once its handlers have run for
+that many. With an agent that sends no count, the client waits until the history stops arriving,
+and logs that it did.
+
 ## Develop
 
 ```sh

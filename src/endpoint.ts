@@ -15,6 +15,7 @@
 import { type Cause, Deferred, Effect, Queue, type Scope, Stream } from "effect";
 import { ErrorCode, JsonRpcError, type JsonRpcErrorObject, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
+import { makeReplayCounter, makeReplayWaiter } from "./replay.ts";
 import * as Methods from "./methods.ts";
 import * as Peer from "./peer.ts";
 import {
@@ -186,6 +187,10 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
       );
     };
 
+    // When a reopened session's history has arrived: the agent counts it, the client waits for it.
+    const replayCounter = makeReplayCounter();
+    const replayWaiter = makeReplayWaiter();
+
     let endpoint: Omit<Endpoint, "closed"> | undefined;
     const endpointOf = (peer: Peer.Peer<Methods.Any, Methods.Any>): Omit<Endpoint, "closed"> => {
       if (endpoint !== undefined) return endpoint;
@@ -193,25 +198,46 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
       const gatedCall = Object.fromEntries(
         [...versionCall.byName.keys()].map((method) => [
           method,
-          (payload: unknown) =>
-            gated(method, payload, () => client[method]?.(payload) ?? Effect.die(`no client method ${method}`)),
+          (payload: unknown) => {
+            const sent = gated(method, payload, () => client[method]?.(payload) ?? Effect.die(`no client method ${method}`));
+            return side === "client" && method === "session/load" ? replayWaiter.loading(payload, sent) : sent;
+          },
         ]),
       );
       const extensionCall = Object.fromEntries([...extensions.call.byName.keys()].map((method) => [method, client[method]]));
       endpoint = {
         call: gatedCall as never,
         notify: ((method: string, payload: unknown) =>
-          gated(method, payload, () => peer.notify(method, payload as never))) as never,
+          gated(method, payload, () =>
+            peer.notify(method, payload as never).pipe(Effect.tap(() => Effect.sync(() => replayCounter.sent(method, payload)))),
+          )) as never,
         extensions: { call: extensionCall as never, notify: peer.notify as never },
         open: peer.open,
       };
       return endpoint;
     };
 
-    /** Answers an incoming method: the gates first, then its handler, if it has one. */
+    /**
+     * Answers an incoming method (`answer`), and keeps count of what a reopened session replays: an
+     * agent's `session/load` answer says how many updates it sent, and a client counts each
+     * `session/update` once it has been handled, refused or not.
+     */
     const handlerFor =
       (method: string, handlers: Readonly<Record<string, AnyHandler<R> | undefined>>) =>
       (payload: unknown): Effect.Effect<unknown, JsonRpcErrorObject, R> => {
+        const answered = answer(method, handlers, payload);
+        if (side === "agent" && method === "session/load") return replayCounter.answering(payload, answered);
+        if (side === "client" && method === "session/update")
+          return answered.pipe(Effect.ensuring(Effect.sync(() => replayWaiter.handled(method, payload))));
+        return answered;
+      };
+
+    /** Answers an incoming method: the gates first, then its handler, if it has one. */
+    const answer = (
+      method: string,
+      handlers: Readonly<Record<string, AnyHandler<R> | undefined>>,
+      payload: unknown,
+    ): Effect.Effect<unknown, JsonRpcErrorObject, R> => {
         if (side === "agent" && method === "initialize")
           return Effect.fail(
             new JsonRpcError({

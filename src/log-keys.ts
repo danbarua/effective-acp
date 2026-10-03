@@ -26,6 +26,12 @@ export const logKeys = {
     /** A response arrived whose id matches no pending call, and was ignored. */
     responseIgnored: "acp.peer.response_ignored",
   },
+  replay: {
+    /** A `session/load` answer said how many updates were replayed, and not that many had been handled when the client stopped waiting. */
+    incomplete: "acp.replay.incomplete",
+    /** A `session/load` answer carried no count, so the client waited until the session's updates stopped arriving. */
+    waitedForQuiet: "acp.replay.waited_for_quiet",
+  },
   gate: {
     /** A request or notification from the other end needed a capability that was not advertised; it was answered with an error, or dropped. */
     refusedIncoming: "acp.gate.refused_incoming",

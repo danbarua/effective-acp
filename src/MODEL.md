@@ -358,3 +358,15 @@ advertises it.
   were interrupted, and `run` requires none of its caller. `connection.open` is `true` while the
   connection is open: a handler interrupted by the client's `$/cancel_request` sees `true`, one
   interrupted by the end of the connection `false`.
+
+- AN16. An agent's answer to `session/load` carries `_meta["effective-acp/replayed"]`: how many
+  `session/update`s it sent for that session while answering. The `_meta` its handler returned is
+  kept. ACP's Streamable HTTP transport sends the answer on the connection's stream and the history
+  on the session's, and nothing orders the two; the count says when the history is complete.
+- AN17. A client's `session/load` call completes once its `session/update` handler has run, refused
+  or not, for as many of that session's updates, received since the call was made, as the answer's
+  count says. If that many have not been handled 10 s after the answer, it completes and logs
+  `acp.replay.incomplete { sessionId, replayed, handled, waitedMs }` as a warning. An answer with no
+  count (an agent not built on this library) completes once none of the session's updates has
+  arrived for 300 ms (at most 10 s), logged as `acp.replay.waited_for_quiet { sessionId, handled,
+  waitedMs }`, a warning.

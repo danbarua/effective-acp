@@ -341,7 +341,7 @@ describe("the agent's gates on what the client sends", () => {
     const allowed = await connected({ loadSession: true }, (ctx, sessionId) =>
       ctx.request("session/load", { sessionId, cwd: "/tmp", mcpServers: [] }),
     );
-    expect(allowed.result).toEqual({});
+    expect(allowed.result).toEqual({ _meta: { "effective-acp/replayed": 0 } });
   });
 
   test("AN4: an image block without promptCapabilities.image is answered -32602 naming the capability", async () => {
