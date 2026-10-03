@@ -20,10 +20,7 @@ bun add effective-acp effect   # or: npm install effective-acp effect
 application share one copy of Effect.
 
 Each module is exported with three conditions: `bun` resolves to the TypeScript source, `types` to
-the declarations, and `default` to the built JavaScript, for Node. A Bun project that typechecks
-against the source instead of the declarations sets `"customConditions": ["bun"]` in its
-`tsconfig.json`; it then needs no build, which is how a project can depend on a commit
-(`github:danbarua/effective-acp#<commit>`) before it is published.
+the declarations, and `default` to the built JavaScript, for Node and bundlers.
 
 ## Modules
 
@@ -31,7 +28,8 @@ against the source instead of the declarations sets `"customConditions": ["bun"]
 |---|---|
 | `effective-acp/agent` | An ACP agent: one implementation per protocol version; `run` on a wire, `runStdio` as an editor launches one, `layerHttp` to serve one |
 | `effective-acp/client` | An ACP client: one implementation per protocol version, and `connect` on a wire |
-| `effective-acp/protocol` | The protocol versions (`v1`, `v2`), each its method sets, its `initialize`, and its capability gates |
+| `effective-acp/protocol` | Protocol version 1 (`v1`): its method sets, its `initialize` and its capability gates; and every version's types |
+| `effective-acp/protocol/v2` | The version 2 draft (`v2`), opted into by importing it: only then are version 2's schemas loaded |
 | `effective-acp/schema/v1`, `effective-acp/schema/v2` | Each version's schemas, generated; `…/v1.rpcs`, `…/v2.rpcs`: its method sets |
 | `effective-acp/stdio` | Wires over newline-delimited JSON, ACP's stdio framing |
 | `effective-acp/http` | Streamable HTTP: the agent's end (`serve`) and the client's (`connect`) |
@@ -40,6 +38,25 @@ against the source instead of the declarations sets `"customConditions": ["bun"]
 | `effective-acp/methods` | How a method is declared: its name, params schema and result schema |
 | `effective-acp/json-rpc` | JSON-RPC's messages and error codes, and the `Wire` |
 | `effective-acp/log-keys` | Every event the library logs |
+
+## Ids, errors and logs
+
+Ids are branded strings (`V1.SessionId`, `V1.ToolCallId`, `V1.SessionConfigId` and the rest), so
+one kind of id cannot be passed where another is meant. An id the other end sent is branded
+already. An id that arrives as text, such as from a URL or a file, is branded once where it comes
+in: `V1.SessionId.make(text)`.
+
+A call fails with a `JsonRpcError` when the other end answers with an error: an `Error` whose
+`message` is the other end's message, with its `code` and `data`. It fails with `PeerClosed` when
+the connection ends before the answer, and with `CapabilityNotAdvertised`, before anything is sent,
+when the other end did not advertise what the call needs. A handler fails with a `JsonRpcError`, or
+with any value shaped like one (`{ code, message, data }`); it goes out as those three fields.
+
+The library logs through Effect's logger. What it drops or replaces is logged as a warning with what
+was dropped or replaced: a field that failed to decode and took its default, list items that failed
+to decode, a message the other end sent that this end did not advertise it takes, a notification
+whose params failed to decode, a handler's failure that no one would otherwise hear. `log-keys`
+names every event.
 
 ## Develop
 
