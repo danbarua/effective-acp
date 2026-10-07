@@ -285,5 +285,6 @@ export const layerHttp = <const Impls extends Implementations>(
   Http.serve<Requirements<Impls[number]>>({
     path: options.path,
     keepAliveInterval: options.keepAliveInterval,
+    abandonedAfter: options.abandonedAfter,
     onConnection: (wire) => run({ wire, info: options.info, implementations: options.implementations }),
   }) as Layer.Layer<never, never, HttpRouter.HttpRouter | Requirements<Impls[number]>>;

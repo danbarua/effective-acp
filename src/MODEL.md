@@ -212,6 +212,11 @@ WebSocket is not built: a GET with `Upgrade: websocket` gets 426, as the SDK ans
   server's idle timeout. Under `Bun.serve` with `idleTimeout: 1` and a 200 ms interval, the
   connection's stream stays open for 2.5 s with nothing to send, and then delivers a message the
   agent sends.
+- AH16. `serve` ends a connection that has had no event stream open for `abandonedAfter` (default
+  60 seconds), as DELETE ends it (AH8), and logs `acp.http.connection_abandoned { acpConnectionId,
+  idleMs }` as a warning. The time is counted from the answer to `initialize`, and from when the
+  connection's last open event stream ends; a GET that opens a stream stops the count. A client that
+  goes away without DELETE (a closed or reloaded page) leaves no stream open.
 
 ## Negotiation
 

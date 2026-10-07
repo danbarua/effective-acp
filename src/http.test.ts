@@ -11,7 +11,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
 import { createNodeHttpHandler } from "@agentclientprotocol/sdk/experimental/node";
 import { AcpServer, type HandleRequestOptions } from "@agentclientprotocol/sdk/experimental/server";
-import { Deferred, type Duration, Effect, Fiber, Queue, type Scope, Stream } from "effect";
+import { Deferred, type Duration, Effect, Fiber, Layer, Logger, Queue, type Scope, Stream } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import * as HttpRouter from "effect/http/HttpRouter";
@@ -171,9 +171,17 @@ const quietAgent =
 /** `serve` on `Bun.serve`, port 0. `idleTimeout` is `Bun.serve`'s, in seconds. */
 const hostServe = (
   onConnection: (wire: Wire, connection: { readonly id: string }) => Effect.Effect<void, never, Scope.Scope>,
-  options: { readonly keepAliveInterval?: Duration.Input; readonly idleTimeout?: number } = {},
+  options: {
+    readonly keepAliveInterval?: Duration.Input;
+    readonly abandonedAfter?: Duration.Input;
+    readonly idleTimeout?: number;
+    readonly logger?: Layer.Layer<never>;
+  } = {},
 ) => {
-  const web = HttpRouter.toWebHandler(serve({ onConnection, keepAliveInterval: options.keepAliveInterval }), { disableLogger: true });
+  const routes = serve({ onConnection, keepAliveInterval: options.keepAliveInterval, abandonedAfter: options.abandonedAfter });
+  const web = HttpRouter.toWebHandler(options.logger === undefined ? routes : routes.pipe(Layer.provide(options.logger)), {
+    disableLogger: true,
+  });
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -653,6 +661,61 @@ describe("serve's routing, over raw HTTP", () => {
     await second.stop();
     expect(await connection.next()).toBeUndefined();
     await settled(stopped.scopeClosed);
+  });
+
+  test("AH16: a connection whose last event stream ended is ended after abandonedAfter, as DELETE ends it, with a warning", async () => {
+    const abandoned = makeProbe();
+    const logged: Array<{ readonly level: string; readonly message: ReadonlyArray<unknown> }> = [];
+    const logger = Logger.layer([
+      Logger.make((options) => logged.push({ level: options.logLevel, message: options.message as ReadonlyArray<unknown> })),
+    ]);
+    const host = hostServe(wireAgent(abandoned), { abandonedAfter: "200 millis", logger });
+    try {
+      const connectionId = await connectionOf(host.url);
+      const connection = await events(host.url, connectionId);
+      await connection.cancel();
+      await settled(abandoned.scopeClosed);
+      await settled(abandoned.wireEnded);
+      expect((await post(host.url, { jsonrpc: "2.0", id: 1, method: "session/new", params: {} }, { "acp-connection-id": connectionId })).status).toBe(404);
+      expect(logged.filter((entry) => entry.level === "Warn").map((entry) => entry.message)).toEqual([
+        ["acp.http.connection_abandoned", { acpConnectionId: connectionId, idleMs: 200, action: "ended the connection as DELETE does" }],
+      ]);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test("AH16: a connection that never opens an event stream is ended after abandonedAfter", async () => {
+    const abandoned = makeProbe();
+    const host = hostServe(wireAgent(abandoned), { abandonedAfter: "200 millis" });
+    try {
+      const connectionId = await connectionOf(host.url);
+      await settled(abandoned.scopeClosed);
+      expect((await post(host.url, { jsonrpc: "2.0", id: 1, method: "session/new", params: {} }, { "acp-connection-id": connectionId })).status).toBe(404);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test("AH16: a connection with an event stream open is kept past abandonedAfter, as is one whose stream is reopened in time", async () => {
+    const kept = makeProbe();
+    const host = hostServe(wireAgent(kept), { abandonedAfter: "300 millis" });
+    try {
+      const connectionId = await connectionOf(host.url);
+      const first = await events(host.url, connectionId);
+      await first.cancel();
+      // No stream is open now. The server releases the stream when it sees the cancel; a GET before that is 409 (AH7).
+      await Bun.sleep(50);
+      const second = await events(host.url, connectionId);
+      const session = await events(host.url, connectionId, "s");
+      await second.cancel();
+      await Bun.sleep(900);
+      expect((await post(host.url, { jsonrpc: "2.0", id: 1, method: "session/new", params: {} }, { "acp-connection-id": connectionId })).status).toBe(202);
+      await session.cancel();
+      expect(Deferred.isDoneUnsafe(kept.scopeClosed)).toBe(false);
+    } finally {
+      await host.stop();
+    }
   });
 
   test("AH9: when the agent's first message does not answer initialize, the POST is answered 500 with a JSON-RPC error and the connection is gone", async () => {

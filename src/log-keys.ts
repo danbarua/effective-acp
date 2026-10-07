@@ -32,6 +32,10 @@ export const logKeys = {
     /** A `session/load` answer carried no count, so the client waited until the session's updates stopped arriving. */
     waitedForQuiet: "acp.replay.waited_for_quiet",
   },
+  http: {
+    /** `serve` ended a connection that had no event stream open for `abandonedAfter`, as DELETE ends one. */
+    connectionAbandoned: "acp.http.connection_abandoned",
+  },
   gate: {
     /** A request or notification from the other end needed a capability that was not advertised; it was answered with an error, or dropped. */
     refusedIncoming: "acp.gate.refused_incoming",

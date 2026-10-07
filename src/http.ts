@@ -10,7 +10,7 @@
  * `createHttpStream`. WebSocket upgrade is not implemented: such a GET is answered 426.
  */
 
-import { Cause, Deferred, type Duration, Effect, Exit, Fiber, type Layer, Predicate, Queue, Scope, Semaphore, Stream } from "effect";
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, type Layer, Predicate, Queue, Scope, Semaphore, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -19,6 +19,7 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { isRequest, isResponse, type JsonRpcMessage, type Wire, WireError, WireInput } from "./json-rpc.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** The header naming the connection, set by the agent on its answer to `initialize`. */
 export const ConnectionIdHeader = "Acp-Connection-Id";
@@ -122,6 +123,8 @@ interface ServerConnection {
   readonly scope: Scope.Closeable;
   open: boolean;
   fiber: Fiber.Fiber<void> | undefined;
+  /** Ends the connection once `abandonedAfter` has passed with no event stream open; set while none is. */
+  abandonment: Fiber.Fiber<void> | undefined;
 }
 
 const makeOutbox: Effect.Effect<Outbox> = Effect.map(Queue.unbounded<unknown, Cause.Done>(), (queue) => ({ queue, leased: false }));
@@ -151,7 +154,7 @@ const ensureSession = (connection: ServerConnection, sessionId: string): Effect.
  * first bytes (`Bun.serve` does) send them; the rest keep a server or proxy that closes idle
  * connections from closing a stream with nothing to send.
  */
-const sseBody = (outbox: Outbox, keepAliveInterval: Duration.Input): Stream.Stream<Uint8Array> =>
+const sseBody = (outbox: Outbox, keepAliveInterval: Duration.Input, released: Effect.Effect<void>): Stream.Stream<Uint8Array> =>
   Stream.fromQueue(outbox.queue).pipe(
     Stream.map((message) => `data: ${JSON.stringify(message)}\n\n`),
     Stream.merge(Stream.tick(keepAliveInterval).pipe(Stream.as(":\n\n")), { haltStrategy: "left" }),
@@ -159,7 +162,7 @@ const sseBody = (outbox: Outbox, keepAliveInterval: Duration.Input): Stream.Stre
     Stream.ensuring(
       Effect.sync(() => {
         outbox.leased = false;
-      }),
+      }).pipe(Effect.andThen(released)),
     ),
   );
 
@@ -222,6 +225,12 @@ export interface ServeOptions<R> {
    */
   readonly keepAliveInterval?: Duration.Input | undefined;
   /**
+   * How long a connection may have no event stream open before `serve` ends it, as DELETE does.
+   * Default 60 seconds. A client that goes away without DELETE (a closed or reloaded page) sends
+   * nothing more, and its connection's agent end would otherwise run until the server stops.
+   */
+  readonly abandonedAfter?: Duration.Input | undefined;
+  /**
    * Runs once per ACP connection, from its `initialize` until the client's DELETE or the server's
    * stop, which close its scope. The first message it writes must answer `initialize`. When it
    * returns, the connection ends: its streams deliver what is queued and close.
@@ -242,16 +251,54 @@ export const serve = <R = never>(
       const connections = new Map<string, ServerConnection>();
       const path = options.path ?? "/acp";
       const keepAliveInterval = options.keepAliveInterval ?? "5 seconds";
+      const abandonedAfter = options.abandonedAfter ?? "60 seconds";
+      const abandonedAfterMs = Duration.toMillis(Duration.fromInputUnsafe(abandonedAfter));
 
       const forget = (connection: ServerConnection): void => {
         connection.open = false;
         if (connections.get(connection.id) === connection) connections.delete(connection.id);
       };
 
+      const hasReader = (connection: ServerConnection): boolean =>
+        connection.connectionStream.leased || [...connection.sessions.values()].some((outbox) => outbox.leased);
+
+      const stopAbandonment = (connection: ServerConnection): Effect.Effect<void> =>
+        Effect.suspend(() => {
+          const fiber = connection.abandonment;
+          connection.abandonment = undefined;
+          return fiber === undefined ? Effect.void : Fiber.interrupt(fiber);
+        });
+
+      /** A connection with no event stream open is ended `abandonedAfter` later, unless a GET opens one first. */
+      const watchAbandonment = (connection: ServerConnection): Effect.Effect<void> =>
+        stopAbandonment(connection).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              if (!connection.open || hasReader(connection)) return;
+              connection.abandonment = Effect.runForkWith(context)(
+                Effect.sleep(abandonedAfter).pipe(
+                  Effect.andThen(
+                    Effect.suspend(() => {
+                      connection.abandonment = undefined;
+                      if (!connection.open || hasReader(connection)) return Effect.void;
+                      return Effect.logWarning(logKeys.http.connectionAbandoned, {
+                        acpConnectionId: connection.id,
+                        idleMs: abandonedAfterMs,
+                        action: "ended the connection as DELETE does",
+                      }).pipe(Effect.andThen(shutdown(connection)));
+                    }),
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+
       /** The agent's end returned: deliver what is queued, then close the streams and the scope. */
       const ended = (connection: ServerConnection): Effect.Effect<void> =>
         Effect.gen(function* () {
           forget(connection);
+          yield* stopAbandonment(connection);
           yield* Deferred.fail(connection.initial, notAnswered());
           yield* Queue.end(connection.inbound);
           yield* finishOutbox(connection.connectionStream);
@@ -263,6 +310,7 @@ export const serve = <R = never>(
       const shutdown = (connection: ServerConnection): Effect.Effect<void> =>
         Effect.gen(function* () {
           forget(connection);
+          yield* stopAbandonment(connection);
           yield* abortOutbox(connection.connectionStream);
           yield* Effect.forEach(connection.sessions.values(), abortOutbox, { discard: true });
           connection.sessions.clear();
@@ -285,6 +333,7 @@ export const serve = <R = never>(
           scope: yield* Scope.make(),
           open: true,
           fiber: undefined,
+          abandonment: undefined,
         };
         connections.set(connection.id, connection);
         const wire: Wire = {
@@ -319,6 +368,7 @@ export const serve = <R = never>(
               yield* shutdown(connection);
               return initializeFailed(id, notAnswered().reason);
             }
+            yield* watchAbandonment(connection);
             return HttpServerResponse.jsonUnsafe(answer, { headers: { [connectionIdKey]: connection.id } });
           }).pipe(
             Effect.catch((error) => Effect.as(shutdown(connection), initializeFailed(id, error.reason))),
@@ -409,7 +459,8 @@ export const serve = <R = never>(
           const outbox = sessionId === undefined ? connection.connectionStream : yield* ensureSession(connection, sessionId);
           if (outbox.leased) return textResponse("Outbound stream already has an active receiver", 409);
           outbox.leased = true;
-          return HttpServerResponse.stream(sseBody(outbox, keepAliveInterval), {
+          yield* stopAbandonment(connection);
+          return HttpServerResponse.stream(sseBody(outbox, keepAliveInterval, watchAbandonment(connection)), {
             contentType: eventStream,
             headers: { "cache-control": "no-cache", connection: "keep-alive" },
           });
